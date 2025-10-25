@@ -1,0 +1,92 @@
+{
+  "project": {
+    "name": "OceanCrust Pizza",
+    "currency": "CAD",
+    "initial_investment": 180000,
+    "base_month": "May",
+    "year_over_year_sales_growth": 0.10
+  },
+
+  "menu": {
+    "traditional": {
+      "Cheese": { "cost": 5.00, "price": 19.00 },
+      "Chicken": { "cost": 9.00, "price": 28.00 },
+      "Beef": { "cost": 9.00, "price": 28.00 },
+      "Veggie": { "cost": 8.00, "price": 26.00 }
+    },
+    "seafood": {
+      "Butterfly": { "cost": 27.00, "price": 64.00 },
+      "Mermaid": { "cost": 35.00, "price": 84.00 },
+      "Serpent": { "cost": 54.00, "price": 115.00 },
+      "Storm": { "cost": 65.00, "price": 135.00 }
+    },
+    "sales_mix": { "traditional": 0.66, "seafood": 0.34 }
+  },
+
+  "sales_models": {
+    "Scenario_1_Magdy": [1.00, 1.30, 1.69, 2.11, 2.64, 3.30, 2.31, 2.31, 1.16, 1.16, 2.31, 2.31],
+    "Scenario_2_Faheem_Conservative": [1.00, 1.20, 1.30, 1.30, 1.25, 1.00, 0.75, 0.75, 0.65, 0.65, 0.80, 0.90],
+    "Scenario_3_Middle_Ground": [1.00, 1.30, 1.69, 2.11, 2.11, 2.11, 1.69, 1.69, 1.35, 1.35, 1.76, 1.76],
+    "Scenario_4_Baseline_50pctGross": [1.00, 1.30, 1.69, 1.69, 1.69, 1.69, 1.18, 1.18, 0.83, 0.83, 1.18, 1.35],
+    "Scenario_5_Flat_Growth": [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00]
+  },
+
+  "expenses": {
+    "rent": {
+      "base": 8500,
+      "annual_increase_rate": 0.05
+    },
+    "equipment_lease": {
+      "monthly": 2000
+    },
+    "utilities": {
+      "tiers": [
+        { "sales_min": 0, "sales_max": 60000, "cost": 1600 },
+        { "sales_min": 60000, "sales_max": 90000, "cost": 1800 },
+        { "sales_min": 90000, "sales_max": 120000, "cost": 2000 }
+      ]
+    },
+    "insurance": {
+      "monthly": 150
+    },
+    "accounting": {
+      "monthly": 100
+    },
+    "marketing": {
+      "initial_cost": 15000,
+      "monthly": 0
+    },
+    "meals_and_entertainment": {
+      "monthly_base": 600
+    },
+    "office_expense": {
+      "monthly_base": 70
+    },
+    "capital_expenses": {
+      "capital_purchases": 95000,
+      "startup_costs": 55000,
+      "website_system": 5050,
+      "contingency_fund": 10000
+    }
+  },
+
+  "labour": {
+    "roles": {
+      "entry": { "hour_rate": 18, "min_count": 1 },
+      "experienced": { "hour_rate": 30, "min_count": 1 },
+      "manager": { "hour_rate": 40, "min_count": 1 }
+    },
+    "scaling_rules": {
+      "sales_per_additional_worker": 30000,
+      "hours_per_day": 12,
+      "days_per_month": 30
+    }
+  },
+
+  "investment_model": {
+    "roi_range": { "min": 0.30, "max": 1.10 },
+    "unlock_step_1": 0.15,
+    "unlock_step_2": 0.075,
+    "unlock_step_2_threshold": 1.10
+  }
+}
