@@ -74,6 +74,7 @@
       "manager": { "hour_rate": 19, "min_count": 1 }
     },
     "scaling_rules": {
+      "daily_sales_threshold_for_extra_worker": 100,
       "hours_per_day": 10,
       "days_per_month": 28
     }

@@ -114,8 +114,9 @@ def labour_cost_for_sales(labour_cfg: Dict[str, Any], daily_sales: float) -> flo
         min_count = int(role.get("min_count", 0))
         total_monthly_cost += rate * hours_per_month * min_count
 
-    # Add one extra entry worker if daily sales > 100
-    if daily_sales > 100:
+    # Add one extra entry worker if daily sales > threshold
+    scaling_threshold = float(rules.get("daily_sales_threshold_for_extra_worker", 100))
+    if daily_sales > scaling_threshold:
         entry_role = roles.get("entry", {"hour_rate": 18})
         entry_rate = float(entry_role.get("hour_rate", 18))
         total_monthly_cost += 1 * entry_rate * hours_per_month
@@ -276,9 +277,8 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
         "NetProfit": "sum",
         "CashFlow": "sum"
     }).reset_index()
-    # Annual ROI (business) = Annual NetProfit / initial_investment (capital base)
-    initial_investment = float(project.get("initial_investment", 180000.0))
-    annual["Annual_ROI"] = (annual["NetProfit"] / max(1e-9, initial_investment))
+    # Annual ROI should be based on the dynamically calculated total capital
+    annual["Annual_ROI"] = (annual["NetProfit"] / max(1e-9, cumulative_invested))
 
     # Round all numeric columns in annual summary
     for col in annual.select_dtypes(include=np.number).columns:
