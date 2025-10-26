@@ -4,23 +4,20 @@
     "currency": "CAD",
     "initial_investment": 180000,
     "base_month": "May",
-    "year_over_year_sales_growth": 0.10
+    "year_over_year_sales_growth": 0.10,
+    "daily_sales_projection": 60
   },
-
   "menu": {
-    "traditional": {
-      "Cheese": { "cost": 5.00, "price": 19.00 },
-      "Chicken": { "cost": 9.00, "price": 28.00 },
-      "Beef": { "cost": 9.00, "price": 28.00 },
-      "Veggie": { "cost": 8.00, "price": 26.00 }
-    },
-    "seafood": {
-      "Butterfly": { "cost": 27.00, "price": 64.00 },
-      "Mermaid": { "cost": 35.00, "price": 84.00 },
-      "Serpent": { "cost": 54.00, "price": 115.00 },
-      "Storm": { "cost": 65.00, "price": 135.00 }
-    },
-    "sales_mix": { "traditional": 0.66, "seafood": 0.34 }
+    "items": [
+      { "name": "Cheese", "cost": 5.00, "price": 19.00, "ratio": 0.198 },
+      { "name": "Chicken", "cost": 9.00, "price": 28.00, "ratio": 0.20 },
+      { "name": "Beef", "cost": 9.00, "price": 28.00, "ratio": 0.15 },
+      { "name": "Veggie", "cost": 8.00, "price": 26.00, "ratio": 0.13 },
+      { "name": "Butterfly", "cost": 27.00, "price": 64.00, "ratio": 0.075 },
+      { "name": "Mermaid", "cost": 35.00, "price": 84.00, "ratio": 0.095 },
+      { "name": "Serpent", "cost": 54.00, "price": 115.00, "ratio": 0.095 },
+      { "name": "Storm", "cost": 65.00, "price": 135.00, "ratio": 0.057 }
+    ]
   },
 
   "sales_models": {
@@ -33,7 +30,7 @@
 
   "expenses": {
     "rent": {
-      "base": 8500,
+      "base": 11000,
       "annual_increase_rate": 0.05
     },
     "equipment_lease": {
@@ -54,7 +51,7 @@
     },
     "marketing": {
       "initial_cost": 15000,
-      "monthly": 0
+      "monthly": 100
     },
     "meals_and_entertainment": {
       "monthly_base": 600
@@ -72,14 +69,13 @@
 
   "labour": {
     "roles": {
-      "entry": { "hour_rate": 18, "min_count": 1 },
-      "experienced": { "hour_rate": 30, "min_count": 1 },
-      "manager": { "hour_rate": 40, "min_count": 1 }
+      "entry": { "hour_rate": 19, "min_count": 1 },
+      "experienced": { "hour_rate": 19, "min_count": 1 },
+      "manager": { "hour_rate": 19, "min_count": 1 }
     },
     "scaling_rules": {
-      "sales_per_additional_worker": 30000,
-      "hours_per_day": 12,
-      "days_per_month": 30
+      "hours_per_day": 10,
+      "days_per_month": 28
     }
   },
 

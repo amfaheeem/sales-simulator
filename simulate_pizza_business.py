@@ -50,13 +50,24 @@ def month_index_map(base_month: str) -> Dict[str, int]:
     return {m: i for i, m in enumerate(ordered)}
 
 
-def get_base_anchor_revenue(cfg: Dict[str, Any]) -> float:
-    """
-    Base revenue for month 0.
-    You can specify it as project.base_month_revenue in the config.
-    If not provided, we use a safe default = 50,000 (CAD).
-    """
-    return float(cfg.get("project", {}).get("base_month_revenue", 50000.0))
+def calculate_daily_financials(daily_sales: float, menu_cfg: Dict[str, Any]) -> Tuple[float, float]:
+    """Calculate total daily revenue and COGS from daily sales projection and menu mix."""
+    items = menu_cfg.get("items", [])
+    if not items:
+        return 0.0, 0.0
+
+    total_revenue = 0.0
+    total_cogs = 0.0
+    for item in items:
+        price = float(item.get("price", 0))
+        cost = float(item.get("cost", 0))
+        ratio = float(item.get("ratio", 0))
+
+        num_sold = daily_sales * ratio
+        total_revenue += num_sold * price
+        total_cogs += num_sold * cost
+
+    return total_revenue, total_cogs
 
 
 def annualize_rent(month_idx: int, base_rent: float, annual_increase_rate: float, base_month_idx: int = 0) -> float:
@@ -84,85 +95,32 @@ def utilities_cost_for_sales(utilities_cfg: Dict[str, Any], monthly_sales: float
     return float(max(tiers, key=lambda x: x.get("sales_max", 0.0)).get("cost", 0.0))
 
 
-def labour_cost_for_sales(labour_cfg: Dict[str, Any], monthly_sales: float) -> float:
+def labour_cost_for_sales(labour_cfg: Dict[str, Any], daily_sales: float) -> float:
     """
     Compute monthly labour cost:
     - Start with minimum staffing (entry, experienced, manager).
-    - Add additional entry-level headcount as sales grow: +1 per 'sales_per_additional_worker' of monthly sales.
-      (You can refine later to add experienced roles too if desired.)
-    - Total hours = hours_per_day * days_per_month per worker.
+    - If daily sales exceed 100, add one additional entry-level worker.
     """
     roles = labour_cfg.get("roles", {})
     rules = labour_cfg.get("scaling_rules", {})
-    hours_per_day = float(rules.get("hours_per_day", 12))
-    days_per_month = float(rules.get("days_per_month", 30))
-    sales_per_worker = float(rules.get("sales_per_additional_worker", 30000))
+    hours_per_day = float(rules.get("hours_per_day", 10))
+    days_per_month = float(rules.get("days_per_month", 26))
+    hours_per_month = hours_per_day * days_per_month
 
-    # Base staffing
+    # Base staffing cost
     total_monthly_cost = 0.0
     for role_name, role in roles.items():
         rate = float(role.get("hour_rate", 0.0))
         min_count = int(role.get("min_count", 0))
-        hours = hours_per_day * days_per_month
-        total_monthly_cost += rate * hours * min_count
+        total_monthly_cost += rate * hours_per_month * min_count
 
-    # Additional scaling: we'll add entry-level workers first for simplicity
-    extra_workers = 0
-    if sales_per_worker > 0:
-        extra_workers = int(max(0, math.floor(monthly_sales / sales_per_worker)))
-    entry_role = roles.get("entry", {"hour_rate": 18})
-    entry_rate = float(entry_role.get("hour_rate", 18))
-    hours = hours_per_day * days_per_month
-    total_monthly_cost += extra_workers * entry_rate * hours
+    # Add one extra entry worker if daily sales > 100
+    if daily_sales > 100:
+        entry_role = roles.get("entry", {"hour_rate": 18})
+        entry_rate = float(entry_role.get("hour_rate", 18))
+        total_monthly_cost += 1 * entry_rate * hours_per_month
 
     return total_monthly_cost
-
-
-def cogs_from_menu_and_mix(menu_cfg: Dict[str, Any], monthly_revenue: float) -> Tuple[float, float, float]:
-    """
-    Estimate COGS based on menu-level costs and prices and the sales mix.
-    Approach: compute weighted average gross margin from traditional vs seafood item baskets,
-    then apply to monthly revenue.
-    Return: (cogs, gross_profit, gross_margin_pct)
-    """
-    def avg_margin_one(category: Dict[str, Any]) -> float:
-        # average margin across items (simple average of item margins)
-        margins = []
-        for _, item in category.items():
-            price = float(item.get("price", 0))
-            cost = float(item.get("cost", 0))
-            if price <= 0:
-                continue
-            margins.append((price - cost) / price)
-        return np.mean(margins) if margins else 0.6  # default if missing
-
-    sales_mix = menu_cfg.get("sales_mix", {"traditional": 0.66, "seafood": 0.34})
-    trad = menu_cfg.get("traditional", {})
-    sea = menu_cfg.get("seafood", {})
-
-    trad_margin = avg_margin_one(trad)
-    sea_margin  = avg_margin_one(sea)
-
-    blended_margin = trad_margin * sales_mix.get("traditional", 0.66) + sea_margin * sales_mix.get("seafood", 0.34)
-    gross_profit = monthly_revenue * blended_margin
-    cogs = monthly_revenue - gross_profit
-    gross_margin_pct = blended_margin
-    return cogs, gross_profit, gross_margin_pct
-
-
-def build_monthly_revenue(base_anchor: float, multipliers: List[float], yoy_growth: float, years: int = 1) -> List[float]:
-    """
-    Build monthly revenue array for N years using provided multipliers (length 12) and optional YoY growth.
-    Example: if years=5, you'll get 60 months of revenue, where each block of 12 months
-    is increased by (1 + yoy_growth) ** year_index.
-    """
-    if len(multipliers) != 12:
-        raise ValueError("Each sales scenario must provide exactly 12 monthly multipliers.")
-    months = []
-    for y in range(years):
-        growth_factor = (1.0 + yoy_growth) ** y
-        months.extend([base_anchor * m * growth_factor for m in multipliers])
-    return months
 
 
 def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 5) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -184,15 +142,15 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
     currency = project.get("currency", "CAD")
     base_month = project.get("base_month", "May")
     yoy_growth = float(project.get("year_over_year_sales_growth", 0.10))
-    base_anchor_revenue = get_base_anchor_revenue(cfg)
+    base_daily_sales = float(project.get("daily_sales_projection", 40.0))
 
     # Sales multipliers for scenario
     if scenario_name not in sales_models:
         raise ValueError(f"Scenario '{scenario_name}' not found in sales_models.")
     multipliers = list(map(float, sales_models[scenario_name]))
 
-    # Build monthly revenue series (years * 12 months)
-    monthly_revenue = build_monthly_revenue(base_anchor_revenue, multipliers, yoy_growth, years=years)
+    # Days in month from labour config for scaling daily figures
+    days_in_month = float(labour_cfg.get("scaling_rules", {}).get("days_per_month", 30))
 
     # Rent & lead months logic
     rent_cfg = expenses_cfg.get("rent", {"base": 0.0, "annual_increase_rate": 0.0})
@@ -217,9 +175,9 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
     accounting = float(expenses_cfg.get("accounting", {}).get("monthly", 0.0))
 
     # Marketing
-    mkt = expenses_cfg.get("marketing", {})
-    mkt_initial = float(mkt.get("initial_cost", 0.0))
-    mkt_monthly = float(mkt.get("monthly", 0.0))
+    mkt_cfg = expenses_cfg.get("marketing", {})
+    mkt_initial = float(mkt_cfg.get("initial_cost", 0.0))
+    mkt_monthly = float(mkt_cfg.get("monthly", 0.0))
 
     meals = float(expenses_cfg.get("meals_and_entertainment", {}).get("monthly_base", 0.0))
     office = float(expenses_cfg.get("office_expense", {}).get("monthly_base", 0.0))
@@ -235,21 +193,29 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
     # Track cumulative cash and invested capital (capital + any pre-open rent)
     cash = 0.0
     cumulative_invested = total_capital  # initial investment basis
-    # Treat marketing initial as part of capital base (so it affects ROI denominator)
-    if mkt_initial > 0:
-        cumulative_invested += mkt_initial
-
-    # For the first operational month, subtract marketing initial cost from cash (startup outflow)
-    marketing_initial_paid = False
+    # Add initial marketing cost to the capital base for ROI calculation
+    cumulative_invested += mkt_initial
 
     for t in range(n_months):
         year_num = (t // 12) + 1
         month_in_year_idx = t % 12
         month_name = MONTHS[(start_month_idx + month_in_year_idx) % 12]
 
-        revenue = monthly_revenue[t]
-        # COGS via menu + mix
-        cogs, gp, gm_pct = cogs_from_menu_and_mix(menu_cfg, revenue)
+        # --- Revenue and COGS Calculation ---
+        # 1. Determine daily sales for the current month
+        current_multiplier = multipliers[month_in_year_idx]
+        growth_factor = (1.0 + yoy_growth) ** (year_num - 1)
+        current_daily_sales = base_daily_sales * current_multiplier * growth_factor
+        monthly_pizzas_sold = current_daily_sales * days_in_month
+
+        # 2. Calculate daily revenue and COGS
+        daily_revenue, daily_cogs = calculate_daily_financials(current_daily_sales, menu_cfg)
+
+        # 3. Scale to monthly values
+        revenue = daily_revenue * days_in_month
+        cogs = daily_cogs * days_in_month
+        gp = revenue - cogs
+        gm_pct = (gp / revenue) if revenue > 0 else 0
 
         # OPEX
         this_rent = annualize_rent(t, base_rent, rent_rate, base_month_idx=0)
@@ -260,19 +226,15 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
         this_meals = meals
         this_office = office
         this_util = utilities_cost_for_sales(utilities_cfg, revenue)
-        this_labour = labour_cost_for_sales(labour_cfg, revenue)
+        this_labour = labour_cost_for_sales(labour_cfg, current_daily_sales)
 
         opex = this_rent + this_equip + this_ins + this_acc + this_mkt + this_meals + this_office + this_util + this_labour
 
         # Net profit (operating)
         net = gp - opex
 
-        # Cash flow: add net; subtract marketing initial once in first month
+        # Cash flow: initial marketing is a capital cost, not an operational cash outflow
         cf = net
-        if not marketing_initial_paid and mkt_initial > 0:
-            cf -= mkt_initial
-            marketing_initial_paid = True
-
         cash += cf
 
         # ROI cumulative uses the capital base including startup items
@@ -282,24 +244,25 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
             "Year": year_num,
             "Month": month_name,
             "t": t+1,
-            "Revenue": revenue,
-            "COGS": cogs,
-            "GrossProfit": gp,
-            "GrossMarginPct": gm_pct,
-            "Rent": this_rent,
-            "EquipmentLease": this_equip,
-            "Insurance": this_ins,
-            "Accounting": this_acc,
-            "MarketingMonthly": this_mkt,
-            "MarketingInitialPaid": (mkt_initial if marketing_initial_paid and t == 0 else 0.0),
-            "MealsOffice": this_meals + this_office,
-            "Utilities": this_util,
-            "Labour": this_labour,
-            "OPEX_Total": opex,
-            "NetProfit": net,
-            "CashFlow": cf,
-            "CashCumulative": cash,
-            "ROI_Cumulative": roi_cum
+            "NumberOfPizzas": round(monthly_pizzas_sold),
+            "TotalCapital": round(cumulative_invested),
+            "Revenue": round(revenue),
+            "COGS": round(cogs),
+            "GrossProfit": round(gp),
+            "GrossMarginPct": round(gm_pct, 2),  # Keep percentage as decimal
+            "Rent": round(this_rent),
+            "EquipmentLease": round(this_equip),
+            "Insurance": round(this_ins),
+            "Accounting": round(this_acc),
+            "MarketingMonthly": round(this_mkt),
+            "MealsOffice": round(this_meals + this_office),
+            "Utilities": round(this_util),
+            "Labour": round(this_labour),
+            "OPEX_Total": round(opex),
+            "NetProfit": round(net),
+            "CashFlow": round(cf),
+            "CashCumulative": round(cash),
+            "ROI_Cumulative": round(roi_cum, 2) # Keep percentage as decimal
         })
 
     monthly_df = pd.DataFrame(rows)
@@ -315,7 +278,14 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
     }).reset_index()
     # Annual ROI (business) = Annual NetProfit / initial_investment (capital base)
     initial_investment = float(project.get("initial_investment", 180000.0))
-    annual["Annual_ROI"] = annual["NetProfit"] / max(1e-9, initial_investment)
+    annual["Annual_ROI"] = (annual["NetProfit"] / max(1e-9, initial_investment))
+
+    # Round all numeric columns in annual summary
+    for col in annual.select_dtypes(include=np.number).columns:
+        if col not in ["Year", "Annual_ROI"]:
+            annual[col] = annual[col].round()
+        elif col == "Annual_ROI":
+            annual[col] = annual[col].round(2) # Keep percentage as decimal
 
     # Ownership & equity unlock per year
     roi_min = float(invest_cfg.get("roi_range", {}).get("min", 0.30))
@@ -351,14 +321,14 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
 
         own_rows.append({
             "Year": y,
-            "Annual_ROI": roi,
-            "Unlock_Step1": unlock1,
-            "Unlock_Step2": unlock2,
-            "Unlock_Total": total_unlock,
-            "Founder_Equity_Start": founder_eq,
-            "Investor_Equity_Start": investor_eq,
-            "Founder_Equity_End": founder_eq + total_unlock,
-            "Investor_Equity_End": investor_eq - total_unlock
+            "Annual_ROI": round(roi, 2),
+            "Unlock_Step1": round(unlock1, 2),
+            "Unlock_Step2": round(unlock2, 2),
+            "Unlock_Total": round(total_unlock, 2),
+            "Founder_Equity_Start": round(founder_eq, 2),
+            "Investor_Equity_Start": round(investor_eq, 2),
+            "Founder_Equity_End": round(founder_eq + total_unlock, 2),
+            "Investor_Equity_End": round(investor_eq - total_unlock, 2)
         })
 
         # Apply transfer for next year's start
@@ -371,8 +341,7 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
 
     ownership_df = pd.DataFrame(own_rows)
 
-    # Attach scenario metadata
-    monthly_df["Scenario"] = scenario_name
+    # Attach scenario metadata to annual and ownership reports only
     annual["Scenario"] = scenario_name
     ownership_df["Scenario"] = scenario_name
 
@@ -383,18 +352,19 @@ def build_dashboard(monthly_df: pd.DataFrame, annual_df: pd.DataFrame, ownership
     """Create a compact interactive Plotly dashboard and write to HTML."""
     # --- Figure 1: Monthly Revenue vs COGS vs OPEX ---
     fig1 = make_subplots(specs=[[{"secondary_y": False}]], rows=1, cols=1)
-    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["Revenue"], name="Revenue"))
-    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["COGS"], name="COGS"))
-    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["OPEX_Total"], name="OPEX"))
+    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["Revenue"], name="Revenue", hovertemplate='$%{y:,.0f}'))
+    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["COGS"], name="COGS", hovertemplate='$%{y:,.0f}'))
+    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["OPEX_Total"], name="OPEX", hovertemplate='$%{y:,.0f}'))
     fig1.update_layout(title=f"Monthly Revenue / COGS / OPEX — {scenario_name}", xaxis_title="Month", yaxis_title="CAD")
+    fig1.update_yaxes(tickprefix="$", tickformat=".2s")
 
     # --- Figure 2: Monthly Net Profit & Cumulative ROI ---
     fig2 = make_subplots(specs=[[{"secondary_y": True}]], rows=1, cols=1)
-    fig2.add_trace(go.Bar(x=monthly_df["t"], y=monthly_df["NetProfit"], name="Net Profit"), secondary_y=False)
-    fig2.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["ROI_Cumulative"], name="Cumulative ROI"), secondary_y=True)
+    fig2.add_trace(go.Bar(x=monthly_df["t"], y=monthly_df["NetProfit"], name="Net Profit", hovertemplate='$%{y:,.0f}'), secondary_y=False)
+    fig2.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["ROI_Cumulative"], name="Cumulative ROI", hovertemplate='%{y:.2f}'), secondary_y=True)
     fig2.update_layout(title=f"Monthly Net Profit & Cumulative ROI — {scenario_name}")
     fig2.update_xaxes(title="Month")
-    fig2.update_yaxes(title_text="Net Profit (CAD)", secondary_y=False)
+    fig2.update_yaxes(title_text="Net Profit (CAD)", secondary_y=False, tickprefix="$", tickformat=".2s")
     fig2.update_yaxes(title_text="Cumulative ROI", secondary_y=True)
 
     # --- Figure 3: Annual Ownership Transfer ---
@@ -410,10 +380,11 @@ def build_dashboard(monthly_df: pd.DataFrame, annual_df: pd.DataFrame, ownership
 
     # --- Figure 4: Annual P&L ---
     fig4 = make_subplots(specs=[[{"secondary_y": False}]])
-    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["Revenue"], name="Revenue"))
-    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["GrossProfit"], name="Gross Profit"))
-    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["NetProfit"], name="Net Profit"))
+    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["Revenue"], name="Revenue", hovertemplate='$%{y:,.0f}'))
+    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["GrossProfit"], name="Gross Profit", hovertemplate='$%{y:,.0f}'))
+    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["NetProfit"], name="Net Profit", hovertemplate='$%{y:,.0f}'))
     fig4.update_layout(barmode="group", title=f"Annual Financials — {scenario_name}", xaxis_title="Year", yaxis_title="CAD")
+    fig4.update_yaxes(tickprefix="$", tickformat=".2s")
 
     # Assemble simple HTML
     html_parts = []
@@ -435,7 +406,7 @@ def build_dashboard(monthly_df: pd.DataFrame, annual_df: pd.DataFrame, ownership
 def main():
     parser = argparse.ArgumentParser(description="Simulate pizza business scenarios.")
     parser.add_argument("--config", type=str, default="config.json", help="Path to JSON config file.")
-    parser.add_argument("--scenario", type=str, default="Scenario_3_Middle_Ground", help="Scenario key from 'sales_models' in config.")
+    parser.add_argument("--scenario", type=str, required=True, help="Scenario key from 'sales_models' in config.")
     parser.add_argument("--years", type=int, default=5, help="Number of years to simulate (default 5).")
     parser.add_argument("--outdir", type=str, default=".", help="Output directory.")
     args = parser.parse_args()
