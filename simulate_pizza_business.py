@@ -406,7 +406,7 @@ def build_dashboard(monthly_df: pd.DataFrame, annual_df: pd.DataFrame, ownership
 def main():
     parser = argparse.ArgumentParser(description="Simulate pizza business scenarios.")
     parser.add_argument("--config", type=str, default="config.json", help="Path to JSON config file.")
-    parser.add_argument("--scenario", type=str, required=True, help="Scenario key from 'sales_models' in config.")
+    parser.add_argument("--scenario", type=str, default="Scenario_3_Middle_Ground", help="Scenario key from 'sales_models' in config.")
     parser.add_argument("--years", type=int, default=5, help="Number of years to simulate (default 5).")
     parser.add_argument("--outdir", type=str, default=".", help="Output directory.")
     args = parser.parse_args()

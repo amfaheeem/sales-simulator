@@ -19,7 +19,6 @@
       { "name": "Storm", "cost": 65.00, "price": 135.00, "ratio": 0.057 }
     ]
   },
-
   "sales_models": {
     "Scenario_1_Magdy": [1.00, 1.30, 1.69, 2.11, 2.64, 3.30, 2.31, 2.31, 1.16, 1.16, 2.31, 2.31],
     "Scenario_2_Faheem_Conservative": [1.00, 1.20, 1.30, 1.30, 1.25, 1.00, 0.75, 0.75, 0.65, 0.65, 0.80, 0.90],
@@ -27,15 +26,9 @@
     "Scenario_4_Baseline_50pctGross": [1.00, 1.30, 1.69, 1.69, 1.69, 1.69, 1.18, 1.18, 0.83, 0.83, 1.18, 1.35],
     "Scenario_5_Flat_Growth": [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00]
   },
-
   "expenses": {
-    "rent": {
-      "base": 11000,
-      "annual_increase_rate": 0.05
-    },
-    "equipment_lease": {
-      "monthly": 2000
-    },
+    "rent": { "base": 11000, "annual_increase_rate": 0.05 },
+    "equipment_lease": { "monthly": 2000 },
     "utilities": {
       "tiers": [
         { "sales_min": 0, "sales_max": 60000, "cost": 1600 },
@@ -43,22 +36,11 @@
         { "sales_min": 90000, "sales_max": 120000, "cost": 2000 }
       ]
     },
-    "insurance": {
-      "monthly": 150
-    },
-    "accounting": {
-      "monthly": 100
-    },
-    "marketing": {
-      "initial_cost": 15000,
-      "monthly": 100
-    },
-    "meals_and_entertainment": {
-      "monthly_base": 600
-    },
-    "office_expense": {
-      "monthly_base": 70
-    },
+    "insurance": { "monthly": 150 },
+    "accounting": { "monthly": 100 },
+    "marketing": { "initial_cost": 15000, "monthly": 100 },
+    "meals_and_entertainment": { "monthly_base": 600 },
+    "office_expense": { "monthly_base": 70 },
     "capital_expenses": {
       "capital_purchases": 95000,
       "startup_costs": 55000,
@@ -66,7 +48,6 @@
       "contingency_fund": 10000
     }
   },
-
   "labour": {
     "roles": {
       "entry": { "hour_rate": 19, "min_count": 1 },
@@ -79,7 +60,6 @@
       "days_per_month": 28
     }
   },
-
   "investment_model": {
     "roi_range": { "min": 0.30, "max": 1.10 },
     "unlock_step_1": 0.15,
