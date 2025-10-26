@@ -5,7 +5,7 @@
     "initial_investment": 180000,
     "base_month": "May",
     "year_over_year_sales_growth": 0.10,
-    "daily_sales_projection": 60
+    "daily_sales_projection": 37
   },
   "menu": {
     "items": [
@@ -27,7 +27,7 @@
     "Scenario_5_Flat_Growth": [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00]
   },
   "expenses": {
-    "rent": { "base": 11000, "annual_increase_rate": 0.05 },
+    "rent": { "base": 8500, "annual_increase_rate": 0.05 },
     "equipment_lease": { "monthly": 2000 },
     "utilities": {
       "tiers": [
@@ -38,7 +38,7 @@
     },
     "insurance": { "monthly": 150 },
     "accounting": { "monthly": 100 },
-    "marketing": { "initial_cost": 15000, "monthly": 100 },
+    "marketing": { "initial_cost": 15000, "monthly": 500 },
     "meals_and_entertainment": { "monthly_base": 600 },
     "office_expense": { "monthly_base": 70 },
     "capital_expenses": {
