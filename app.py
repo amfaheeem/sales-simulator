@@ -46,36 +46,39 @@ yoy_growth = st.sidebar.slider(
 
 # Sales Scenario
 st.sidebar.subheader("Sales Model")
-scenario_options = list(config["sales_models"].keys()) + ["Custom..."]
-try:
-    default_scenario_index = scenario_options.index("Scenario_3_Middle_Ground")
-except ValueError:
-    default_scenario_index = 0
 
-selected_scenario = st.sidebar.selectbox(
-    "Select a Sales Scenario",
-    options=scenario_options,
-    index=default_scenario_index
-)
+# Add a checkbox to toggle between multi-scenario and custom scenario
+use_custom_scenario = st.sidebar.checkbox("Define a Custom Scenario")
 
-if selected_scenario == "Custom...":
+scenario_options = list(config["sales_models"].keys())
+default_scenarios = ["Scenario_4_Baseline_50pctGross"]
+selected_scenarios = []
+
+if use_custom_scenario:
     with st.sidebar.expander("Define Custom Multipliers", expanded=True):
         months = ["May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April"]
         
-        # Use session_state to store and persist the custom multiplier values
         if 'custom_multipliers' not in st.session_state:
             st.session_state.custom_multipliers = config["sales_models"]["Scenario_3_Middle_Ground"]
 
         custom_multipliers_list = []
         for i, month in enumerate(months):
-            # The key ensures each slider is unique
             value = st.slider(
                 month, 0.0, 5.0, st.session_state.custom_multipliers[i], 0.05, key=f"slider_{month}"
             )
             custom_multipliers_list.append(value)
         
-        # Update session state with the latest values from the sliders
         st.session_state.custom_multipliers = custom_multipliers_list
+    
+    # When custom is used, we run only one scenario
+    selected_scenarios = ["Custom..."]
+
+else:
+    selected_scenarios = st.sidebar.multiselect(
+        "Select Scenarios to Compare",
+        options=scenario_options,
+        default=default_scenarios
+    )
 
 
 # Expense & Capital Settings
@@ -149,65 +152,145 @@ sim_config["labour"]["scaling_rules"]["daily_sales_threshold_for_extra_worker"] 
 sim_config["expenses"]["marketing"]["initial_cost"] = mkt_initial
 sim_config["expenses"]["marketing"]["monthly"] = mkt_monthly
 
-
 # If the custom scenario is selected, add it to the simulation config
-if selected_scenario == "Custom...":
+if use_custom_scenario:
     sim_config["sales_models"]["Custom..."] = st.session_state.custom_multipliers
 
 
-# Run the simulation
-try:
-    monthly_df, annual_df, ownership_df = simulate_one_scenario(
-        cfg=sim_config,
-        scenario_name=selected_scenario,
-        years=5
+# Run the simulation for each selected scenario
+all_monthly_dfs = []
+all_annual_dfs = []
+all_ownership_dfs = []
+
+if not selected_scenarios:
+    st.warning("Please select at least one scenario to run the simulation.")
+    st.stop()
+
+for scenario in selected_scenarios:
+    try:
+        monthly_df, annual_df, ownership_df = simulate_one_scenario(
+            cfg=sim_config,
+            scenario_name=scenario,
+            years=5
+        )
+        # Add a 'Scenario' column for multi-scenario charting
+        monthly_df['Scenario'] = scenario
+        
+        all_monthly_dfs.append(monthly_df)
+        all_annual_dfs.append(annual_df)
+        all_ownership_dfs.append(ownership_df)
+
+    except Exception as e:
+        st.error(f"An error occurred running scenario '{scenario}': {e}")
+        st.stop()
+
+# Aggregate results
+combined_monthly = pd.concat(all_monthly_dfs)
+combined_annual = pd.concat(all_annual_dfs)
+combined_ownership = pd.concat(all_ownership_dfs)
+
+
+# --- Display Key Metrics ---
+st.header("Key Performance Indicators (Year 1)")
+
+# Create columns for each scenario's KPIs
+kpi_cols = st.columns(len(selected_scenarios))
+
+for i, scenario in enumerate(selected_scenarios):
+    with kpi_cols[i]:
+        st.subheader(scenario)
+        scenario_annual_df = combined_annual[combined_annual['Scenario'] == scenario]
+        y1_net_profit = scenario_annual_df.loc[scenario_annual_df['Year'] == 1, 'NetProfit'].iloc[0]
+        y1_roi = scenario_annual_df.loc[scenario_annual_df['Year'] == 1, 'Annual_ROI'].iloc[0]
+        
+        st.metric("Year 1 Net Profit", f"${y1_net_profit:,.0f}")
+        st.metric("Year 1 Annual ROI", f"{y1_roi:.1%}")
+
+# --- Display Charts ---
+st.header("Financial Projections Dashboard")
+
+import plotly.express as px
+
+# Create toggles for the chart series
+st.write("### Chart Controls")
+cols = st.columns(5)
+with cols[0]:
+    show_revenue = st.checkbox("Revenue", value=True)
+with cols[1]:
+    show_cogs = st.checkbox("COGS", value=False)
+with cols[2]:
+    show_opex = st.checkbox("OPEX", value=False)
+with cols[3]:
+    show_gp = st.checkbox("Gross Profit", value=False)
+with cols[4]:
+    show_np = st.checkbox("Net Profit", value=True)
+
+# --- Chart 1: Monthly Trends ---
+monthly_to_plot = []
+if show_revenue: monthly_to_plot.append("Revenue")
+if show_cogs: monthly_to_plot.append("COGS")
+if show_opex: monthly_to_plot.append("OPEX_Total")
+if show_gp: monthly_to_plot.append("GrossProfit")
+if show_np: monthly_to_plot.append("NetProfit")
+
+if monthly_to_plot:
+    # Melt the dataframe to have a 'Metric' column for line_dash
+    monthly_melted = combined_monthly.melt(
+        id_vars=['t', 'Scenario'], 
+        value_vars=monthly_to_plot,
+        var_name='Metric',
+        value_name='Amount'
     )
-
-    # --- Display Key Metrics ---
-    st.header("Key Performance Indicators (Year 1)")
-    y1_net_profit = annual_df.loc[annual_df['Year'] == 1, 'NetProfit'].iloc[0]
-    y1_roi = annual_df.loc[annual_df['Year'] == 1, 'Annual_ROI'].iloc[0]
-
-    col1, col2 = st.columns(2)
-    col1.metric("Year 1 Net Profit", f"${y1_net_profit:,.0f}")
-    col2.metric("Year 1 Annual ROI", f"{y1_roi:.1%}")
-
-    # --- Display Charts ---
-    st.header("Financial Projections Dashboard")
-
-    from plotly.subplots import make_subplots
-    import plotly.graph_objects as go
-
-    # Chart 1: Monthly Revenue vs COGS vs OPEX
-    fig1 = make_subplots()
-    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["Revenue"], name="Revenue", hovertemplate='$%{y:,.0f}'))
-    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["COGS"], name="COGS", hovertemplate='$%{y:,.0f}'))
-    fig1.add_trace(go.Scatter(x=monthly_df["t"], y=monthly_df["OPEX_Total"], name="OPEX", hovertemplate='$%{y:,.0f}'))
-    fig1.update_layout(title="Monthly Revenue, COGS, and OPEX", yaxis_tickprefix="$", yaxis_tickformat=".2s")
+    fig1 = px.line(
+        monthly_melted, 
+        x="t", 
+        y="Amount", 
+        color="Scenario",
+        line_dash="Metric",
+        title="Monthly Financial Trends",
+        labels={"t": "Month", "Amount": "Amount (CAD)"}
+    )
+    fig1.update_layout(yaxis_tickprefix="$", yaxis_tickformat=".2s")
     st.plotly_chart(fig1, use_container_width=True)
 
-    # Chart 2: Annual Financials
-    fig4 = make_subplots()
-    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["Revenue"], name="Revenue", hovertemplate='$%{y:,.0f}'))
-    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["GrossProfit"], name="Gross Profit", hovertemplate='$%{y:,.0f}'))
-    fig4.add_trace(go.Bar(x=annual_df["Year"], y=annual_df["NetProfit"], name="Net Profit", hovertemplate='$%{y:,.0f}'))
-    fig4.update_layout(barmode="group", title="Annual Financials", yaxis_tickprefix="$", yaxis_tickformat=".2s")
-    st.plotly_chart(fig4, use_container_width=True)
+# --- Chart 2: Annual Summary ---
+annual_to_plot = []
+if show_revenue: annual_to_plot.append("Revenue")
+if show_cogs: annual_to_plot.append("COGS")
+if show_opex: annual_to_plot.append("OPEX_Total")
+if show_gp: annual_to_plot.append("GrossProfit")
+if show_np: annual_to_plot.append("NetProfit")
+
+if annual_to_plot:
+    # Melt the dataframe for the bar chart as well
+    annual_melted = combined_annual.melt(
+        id_vars=['Year', 'Scenario'],
+        value_vars=annual_to_plot,
+        var_name='Metric',
+        value_name='Amount'
+    )
+    fig2 = px.bar(
+        annual_melted,
+        x="Year",
+        y="Amount",
+        color="Scenario",
+        barmode="group",
+        pattern_shape="Metric",
+        title="Annual Financial Summary",
+        labels={"Amount": "Amount (CAD)"}
+    )
+    fig2.update_layout(yaxis_tickprefix="$", yaxis_tickformat=".2s")
+    st.plotly_chart(fig2, use_container_width=True)
 
 
-    # --- Display Data Tables ---
-    st.header("Detailed Data")
+# --- Display Data Tables ---
+st.header("Detailed Data")
 
-    st.subheader("Monthly Financials")
-    st.dataframe(monthly_df)
+st.subheader("Combined Monthly Financials")
+st.dataframe(combined_monthly)
 
-    st.subheader("Annual Summary")
-    st.dataframe(annual_df)
+st.subheader("Combined Annual Summary")
+st.dataframe(combined_annual)
 
-    st.subheader("Ownership & Equity Unlock")
-    st.dataframe(ownership_df)
-
-
-except Exception as e:
-    st.error(f"An error occurred during simulation: {e}")
-    st.exception(e)
+st.subheader("Combined Ownership & Equity Unlock")
+st.dataframe(combined_ownership)
