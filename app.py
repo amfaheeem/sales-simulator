@@ -5,6 +5,8 @@ from pathlib import Path
 from io import BytesIO
 import numpy as np
 import plotly.express as px
+import openpyxl
+from openpyxl.drawing.image import Image
 
 try:
     # This works when run as a package (e.g., on Streamlit Cloud or with `python -m`)
@@ -78,7 +80,13 @@ init_session_state()
 # --- Helper Function for Excel Export ---
 def to_excel(params, monthly, annual, ownership, fig1, fig2):
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    
+    # Pre-create an in-memory workbook to avoid temp file creation
+    workbook = openpyxl.Workbook()
+    workbook.save(output)
+    output.seek(0)
+
+    with pd.ExcelWriter(output, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
         # Parameters Sheet
         params_df = pd.DataFrame(params.items(), columns=['Parameter', 'Value'])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
@@ -89,13 +97,15 @@ def to_excel(params, monthly, annual, ownership, fig1, fig2):
         ownership.to_excel(writer, sheet_name='Ownership_Data', index=False)
 
         # Charts Sheet
+        # Remove default sheet created by openpyxl
+        if 'Sheet' in writer.book.sheetnames:
+            writer.book.remove(writer.book['Sheet'])
+            
         charts_sheet = writer.book.create_sheet('Charts')
         
-        # Convert figures to images and add to the sheet
         img1_bytes = fig1.to_image(format="png")
         img2_bytes = fig2.to_image(format="png")
         
-        from openpyxl.drawing.image import Image
         img1 = Image(BytesIO(img1_bytes))
         img2 = Image(BytesIO(img2_bytes))
 
