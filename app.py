@@ -317,11 +317,11 @@ with cols[4]:
 
 # --- Chart 1: Monthly Trends ---
 monthly_to_plot = []
-if show_revenue: monthly_to_plot.append("Revenue")
-if show_cogs: monthly_to_plot.append("COGS")
-if show_opex: monthly_to_plot.append("OPEX_Total")
-if show_gp: monthly_to_plot.append("GrossProfit")
-if show_np: monthly_to_plot.append("NetProfit")
+if show_revenue and "Revenue" in combined_monthly.columns: monthly_to_plot.append("Revenue")
+if show_cogs and "COGS" in combined_monthly.columns: monthly_to_plot.append("COGS")
+if show_opex and "OPEX_Total" in combined_monthly.columns: monthly_to_plot.append("OPEX_Total")
+if show_gp and "GrossProfit" in combined_monthly.columns: monthly_to_plot.append("GrossProfit")
+if show_np and "NetProfit" in combined_monthly.columns: monthly_to_plot.append("NetProfit")
 
 if monthly_to_plot:
     # Melt the dataframe to have a 'Metric' column for line_dash
@@ -347,11 +347,11 @@ if monthly_to_plot:
 
 # --- Chart 2: Annual Summary ---
 annual_to_plot = []
-if show_revenue: annual_to_plot.append("Revenue")
-if show_cogs: annual_to_plot.append("COGS")
-if show_opex: annual_to_plot.append("OPEX_Total")
-if show_gp: annual_to_plot.append("GrossProfit")
-if show_np: annual_to_plot.append("NetProfit")
+if show_revenue and "Revenue" in combined_annual.columns: annual_to_plot.append("Revenue")
+if show_cogs and "COGS" in combined_annual.columns: annual_to_plot.append("COGS")
+if show_opex and "OPEX_Total" in combined_annual.columns: annual_to_plot.append("OPEX_Total")
+if show_gp and "GrossProfit" in combined_annual.columns: annual_to_plot.append("GrossProfit")
+if show_np and "NetProfit" in combined_annual.columns: annual_to_plot.append("NetProfit")
 
 if annual_to_plot:
     # Melt the dataframe for the bar chart as well
