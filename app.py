@@ -6,8 +6,13 @@ from io import BytesIO
 import numpy as np
 import plotly.express as px
 
-# The simulation script is in the same directory, so we can import it directly.
-from simulate_pizza_business import simulate_one_scenario, simulate_monte_carlo, MCDist
+try:
+    # This works when run as a package (e.g., on Streamlit Cloud or with `python -m`)
+    from .simulate_pizza_business import simulate_one_scenario, simulate_monte_carlo, MCDist
+except ImportError:
+    # This works when run as a script directly (for local development)
+    from simulate_pizza_business import simulate_one_scenario, simulate_monte_carlo, MCDist
+
 
 # --- Page Configuration ---
 st.set_page_config(
