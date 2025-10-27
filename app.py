@@ -80,13 +80,7 @@ init_session_state()
 # --- Helper Function for Excel Export ---
 def to_excel(params, monthly, annual, ownership, fig1, fig2):
     output = BytesIO()
-    
-    # Pre-create an in-memory workbook to avoid temp file creation
-    workbook = openpyxl.Workbook()
-    workbook.save(output)
-    output.seek(0)
-
-    with pd.ExcelWriter(output, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # Parameters Sheet
         params_df = pd.DataFrame(params.items(), columns=['Parameter', 'Value'])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
@@ -97,20 +91,14 @@ def to_excel(params, monthly, annual, ownership, fig1, fig2):
         ownership.to_excel(writer, sheet_name='Ownership_Data', index=False)
 
         # Charts Sheet
-        # Remove default sheet created by openpyxl
-        if 'Sheet' in writer.book.sheetnames:
-            writer.book.remove(writer.book['Sheet'])
-            
-        charts_sheet = writer.book.create_sheet('Charts')
+        workbook = writer.book
+        worksheet = workbook.add_worksheet('Charts')
         
         img1_bytes = fig1.to_image(format="png")
         img2_bytes = fig2.to_image(format="png")
         
-        img1 = Image(BytesIO(img1_bytes))
-        img2 = Image(BytesIO(img2_bytes))
-
-        charts_sheet.add_image(img1, 'A1')
-        charts_sheet.add_image(img2, 'A30')
+        worksheet.insert_image('A1', 'fig1.png', {'image_data': BytesIO(img1_bytes)})
+        worksheet.insert_image('A30', 'fig2.png', {'image_data': BytesIO(img2_bytes)})
         
     processed_data = output.getvalue()
     return processed_data

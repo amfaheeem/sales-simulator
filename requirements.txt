@@ -4,3 +4,4 @@ plotly
 streamlit
 openpyxl
 kaleido
+xlsxwriter
