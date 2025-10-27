@@ -25,12 +25,232 @@ import argparse
 import json
 import math
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Literal
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from dataclasses import dataclass
+
+
+# ------------------------------
+# Monte Carlo Engine
+# ------------------------------
+
+@dataclass
+class MCDist:
+    kind: Literal["const", "triangular", "normal", "lognormal", "dirichlet", "bernoulli"]
+    args: dict
+    bounds: tuple[float, float] | None = None  # clamp if provided
+
+def _rng(seed: int | None) -> np.random.Generator:
+    return np.random.default_rng(seed)
+
+def _sample(dist: MCDist, size: tuple[int, ...], rng: np.random.Generator) -> np.ndarray:
+    """Implement samplers for Monte Carlo distributions."""
+    kind = dist.kind
+    args = dist.args
+    
+    if kind == "const":
+        val = rng.uniform(args["value"], args["value"], size)
+    elif kind == "triangular":
+        val = rng.triangular(args["min"], args["mode"], args["max"], size)
+    elif kind == "normal":
+        val = rng.normal(args["mean"], args["sd"], size)
+    elif kind == "lognormal":
+        val = rng.lognormal(args["mu"], args["sigma"], size)
+    elif kind == "dirichlet":
+        val = rng.dirichlet(args["alpha"], size)
+    elif kind == "bernoulli":
+        p = args["p"]
+        amount_if_true = args.get("amount_if_true", 1.0)
+        val = (rng.random(size) < p) * amount_if_true
+    else:
+        raise ValueError(f"Unknown distribution kind: {kind}")
+
+    if dist.bounds:
+        val = np.clip(val, dist.bounds[0], dist.bounds[1])
+    
+    return val
+
+def map_utilities_cost_vectorized(utilities_cfg: Dict[str, Any], monthly_revenue: np.ndarray) -> np.ndarray:
+    tiers = utilities_cfg.get("tiers", [])
+    if not tiers:
+        return np.zeros_like(monthly_revenue, dtype=float)
+    sales_max = np.array([t.get("sales_max", np.inf) for t in tiers], dtype=float)
+    costs = np.array([t.get("cost", 0.0) for t in tiers], dtype=float)
+    idx = np.searchsorted(sales_max, monthly_revenue, side="right")
+    idx = np.clip(idx, 0, len(costs)-1)
+    return costs[idx]
+
+def first_ge_zero_idx(arr_1d: np.ndarray) -> int:
+    idxs = np.nonzero(arr_1d >= 0)[0]
+    return int(idxs[0]) + 1 if idxs.size else -1
+
+def simulate_monte_carlo(
+    cfg: Dict[str, Any],
+    scenario_name: str,
+    years: int = 5,
+    n_runs: int = 10_000,
+    seed: int | None = 42,
+    dist_overrides: Dict[str, MCDist] | None = None,
+) -> Dict[str, Any]:
+    """
+    Vectorized Monte Carlo over n_runs × (12*years) months.
+    """
+    rng = _rng(seed)
+    n_months = years * 12
+    
+    # --- Config Extraction ---
+    project_cfg = cfg.get("project", {})
+    expenses_cfg = cfg.get("expenses", {})
+    menu_cfg = cfg.get("menu", {})
+    labour_cfg = cfg.get("labour", {})
+
+    # --- Deterministic Baseline Arrays (per month) ---
+    base_daily_sales_proj = float(project_cfg.get("daily_sales_projection", 37.0))
+    yoy_growth = float(project_cfg.get("year_over_year_sales_growth", 0.0))
+    multipliers = np.array(cfg["sales_models"][scenario_name])
+    
+    growth_factors = (1 + yoy_growth) ** np.floor(np.arange(n_months) / 12)
+    base_daily_sales_t = base_daily_sales_proj * np.tile(multipliers, years) * growth_factors
+
+    days_in_month = float(labour_cfg["scaling_rules"].get("days_per_month", 28))
+    
+    base_rent = float(expenses_cfg["rent"].get("base", 0.0))
+    rent_increase = float(expenses_cfg["rent"].get("annual_increase_rate", 0.0))
+    rent_escalation = (1 + rent_increase) ** np.floor(np.arange(n_months) / 12)
+    rent_t = base_rent * rent_escalation
+
+    fixed_opex = sum([
+        float(expenses_cfg.get("equipment_lease", {}).get("monthly", 0.0)),
+        float(expenses_cfg.get("insurance", {}).get("monthly", 0.0)),
+        float(expenses_cfg.get("accounting", {}).get("monthly", 0.0)),
+        float(expenses_cfg.get("marketing", {}).get("monthly", 0.0)),
+        float(expenses_cfg.get("meals_and_entertainment", {}).get("monthly_base", 0.0)),
+        float(expenses_cfg.get("office_expense", {}).get("monthly_base", 0.0)),
+    ])
+
+    # --- Default Distributions ---
+    menu_items = menu_cfg.get("items", [])
+    base_ratios = np.array([item.get("ratio", 0) for item in menu_items])
+    prices = np.array([item.get("price", 0) for item in menu_items])
+    costs = np.array([item.get("cost", 0) for item in menu_items])
+
+    default_dists = {
+        "demand_noise": MCDist("lognormal", {"mu": 0, "sigma": 0.15}),
+        "menu_mix": MCDist("dirichlet", {"alpha": base_ratios * 200}),
+        "incident_shocks": MCDist("bernoulli", {"p": 0.10, "amount_if_true": rng.triangular(400, 1000, 2500, (n_runs, n_months))}),
+        "labour_overrun": MCDist("normal", {"mean": 0.0, "sd": 0.05}),
+        "ingredient_inflation": MCDist("normal", {"mean": 0.003, "sd": 0.004}, bounds=(0, np.inf)),
+    }
+    if dist_overrides:
+        default_dists.update(dist_overrides)
+    
+    # --- Sampling ---
+    demand_noise = _sample(default_dists["demand_noise"], (n_runs, n_months), rng)
+    menu_mix = _sample(default_dists["menu_mix"], (n_runs,), rng)
+    incident_shocks = _sample(default_dists["incident_shocks"], (n_runs, n_months), rng)
+    labour_overrun = _sample(default_dists["labour_overrun"], (n_runs, n_months), rng)
+    
+    avg_price_per_pizza = np.dot(menu_mix, prices)[:, np.newaxis]
+    avg_cost_per_pizza = np.dot(menu_mix, costs)[:, np.newaxis]
+
+    if default_dists.get("ingredient_inflation_enabled", False):
+        inflation_mom = _sample(default_dists["ingredient_inflation"], (n_runs, n_months), rng)
+        inflation_factor = np.cumprod(1 + inflation_mom, axis=1)
+        avg_cost_per_pizza = avg_cost_per_pizza * inflation_factor
+
+    # --- Vectorized Calculations ---
+    daily_sales_t = base_daily_sales_t[np.newaxis, :] * demand_noise
+    monthly_pizzas = daily_sales_t * days_in_month
+    
+    revenue = monthly_pizzas * avg_price_per_pizza
+    cogs = monthly_pizzas * avg_cost_per_pizza
+    gross_profit = revenue - cogs
+    
+    utilities = map_utilities_cost_vectorized(expenses_cfg["utilities"], revenue)
+
+    base_labour_cost = sum(
+        float(role["hour_rate"]) * int(role["min_count"]) * float(labour_cfg["scaling_rules"]["hours_per_day"]) * days_in_month
+        for role in labour_cfg["roles"].values()
+    )
+    extra_worker_cost = float(labour_cfg["roles"]["entry"]["hour_rate"]) * float(labour_cfg["scaling_rules"]["hours_per_day"]) * days_in_month
+    threshold = float(labour_cfg["scaling_rules"].get("daily_sales_threshold_for_extra_worker", 100))
+    
+    has_extra_worker = daily_sales_t > threshold
+    labour = (base_labour_cost + has_extra_worker * extra_worker_cost) * np.maximum(0, 1 + labour_overrun)
+
+    opex = rent_t[np.newaxis, :] + fixed_opex + utilities + labour + incident_shocks
+    net_profit = gross_profit - opex
+    
+    # --- Capital & ROI ---
+    lead_months = int(project_cfg.get("lead_months_before_open", 6))
+    rent_free_months = int(project_cfg.get("rent_free_months", 4))
+    rent_paid_lead = max(0, lead_months - rent_free_months) * base_rent
+    
+    capital_base = sum(float(v) for v in expenses_cfg["capital_expenses"].values())
+    mkt_initial = float(expenses_cfg["marketing"].get("initial_cost", 0.0))
+    cumulative_invested = capital_base + rent_paid_lead + mkt_initial
+    
+    cash_cumulative = np.cumsum(net_profit, axis=1)
+    roi_cumulative = cash_cumulative / cumulative_invested
+
+    payback_matrix = cash_cumulative - cumulative_invested
+    break_even_months = np.apply_along_axis(first_ge_zero_idx, 1, payback_matrix)
+
+    # --- Annual Aggregation ---
+    net_profit_annual = np.sum(net_profit.reshape(n_runs, years, 12), axis=2)
+    annual_roi = net_profit_annual / cumulative_invested
+
+    # --- DataFrame Creation ---
+    month_labels = pd.to_datetime(pd.date_range(start=project_cfg.get("base_month", "May") + " 2025", periods=n_months, freq='MS')).strftime('%b-%y')
+    
+    run_idx = np.arange(n_runs)
+    month_idx = np.arange(n_months)
+    
+    runs_monthly = pd.DataFrame({
+        'run': np.repeat(run_idx, n_months),
+        't': np.tile(month_idx + 1, n_runs),
+        'Year': np.tile(np.floor(month_idx / 12) + 1, n_runs).astype(int),
+        'MonthLabel': np.tile(month_labels, n_runs),
+        'NetProfit': net_profit.flatten(),
+        'CashCumulative': cash_cumulative.flatten(),
+        'ROI_Cumulative': roi_cumulative.flatten(),
+        'Scenario': scenario_name
+    })
+
+    runs_annual = pd.DataFrame({
+        'run': np.repeat(np.arange(n_runs), years),
+        'Year': np.tile(np.arange(years) + 1, n_runs),
+        'NetProfit': net_profit_annual.flatten(),
+        'Annual_ROI': annual_roi.flatten(),
+        'Scenario': scenario_name
+    })
+    runs_annual['break_even_month'] = np.repeat(break_even_months, years)
+
+    # --- Summary Stats ---
+    y1_profit = net_profit_annual[:, 0]
+    roi_12m = annual_roi[:, 0]
+    
+    summary = {
+        'prob_monthly_loss_y1': np.mean(net_profit[:, :12] < 0),
+        'annual_profit_p5_y1': np.percentile(y1_profit, 5),
+        'annual_profit_p50_y1': np.percentile(y1_profit, 50),
+        'annual_profit_p95_y1': np.percentile(y1_profit, 95),
+        'roi12_p5': np.percentile(roi_12m, 5),
+        'roi12_p50': np.percentile(roi_12m, 50),
+        'roi12_p95': np.percentile(roi_12m, 95),
+        'prob_break_even_12m': np.mean((break_even_months <= 12) & (break_even_months != -1)),
+        'break_even_month_p50': np.median(break_even_months[break_even_months != -1]),
+    }
+
+    return {
+        "runs_monthly": runs_monthly,
+        "runs_annual": runs_annual,
+        "summary": summary,
+    }
 
 
 # ------------------------------
@@ -429,25 +649,31 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    monthly_df, annual_df, ownership_df = simulate_one_scenario(cfg, args.scenario, years=args.years)
+    # Run Monte Carlo simulation
+    mc_results = simulate_monte_carlo(cfg, args.scenario, years=args.years)
+    runs_monthly = mc_results["runs_monthly"]
+    runs_annual = mc_results["runs_annual"]
+    summary = mc_results["summary"]
 
     # Write CSVs
     monthly_csv = outdir / f"results_monthly_{args.scenario}.csv"
     annual_csv = outdir / f"results_annual_{args.scenario}.csv"
     owner_csv  = outdir / f"ownership_{args.scenario}.csv"
-    monthly_df.to_csv(monthly_csv, index=False)
-    annual_df.to_csv(annual_csv, index=False)
-    ownership_df.to_csv(owner_csv, index=False)
+    runs_monthly.to_csv(monthly_csv, index=False)
+    runs_annual.to_csv(annual_csv, index=False)
 
     # Build dashboard
     html_path = outdir / f"dashboard_{args.scenario}.html"
-    build_dashboard(monthly_df, annual_df, ownership_df, args.scenario, html_path)
+    build_dashboard(runs_monthly, runs_annual, None, args.scenario, html_path) # Pass None for ownership_df as it's not directly available here
 
     # Print summary pointers
     print(f"✅ Wrote: {monthly_csv}")
     print(f"✅ Wrote: {annual_csv}")
     print(f"✅ Wrote: {owner_csv}")
     print(f"✅ Dashboard: {html_path}")
+    print("\nMonte Carlo Summary:")
+    for key, value in summary.items():
+        print(f"  - {key}: {value}")
 
 
 if __name__ == "__main__":

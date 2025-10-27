@@ -3,9 +3,11 @@ import pandas as pd
 import json
 from pathlib import Path
 from io import BytesIO
+import numpy as np
+import plotly.express as px
 
 # The simulation script is in the same directory, so we can import it directly.
-from simulate_pizza_business import simulate_one_scenario
+from simulate_pizza_business import simulate_one_scenario, simulate_monte_carlo, MCDist
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -68,50 +70,78 @@ def init_session_state():
 init_session_state()
 
 
-# --- Sidebar ---
-with st.sidebar.expander("Load/Save Scenario", expanded=False):
-    uploaded_file = st.file_uploader(
-        "Upload Excel Report to Load Parameters",
-        type="xlsx"
-    )
+# --- Helper Function for Excel Export ---
+def to_excel(params, monthly, annual, ownership, fig1, fig2):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Parameters Sheet
+        params_df = pd.DataFrame(params.items(), columns=['Parameter', 'Value'])
+        params_df.to_excel(writer, sheet_name='Parameters', index=False)
+        
+        # Data Sheets
+        monthly.to_excel(writer, sheet_name='Monthly_Data', index=False)
+        annual.to_excel(writer, sheet_name='Annual_Data', index=False)
+        ownership.to_excel(writer, sheet_name='Ownership_Data', index=False)
 
-    if uploaded_file is not None:
-        if st.button("Load Parameters from File"):
-            try:
-                params_df = pd.read_excel(uploaded_file, sheet_name="Parameters")
-                imported_params = dict(zip(params_df['Parameter'], params_df['Value']))
-                
-                # --- Mapping from Excel names to session_state keys ---
-                param_mapping = {
-                    "Daily Sales Projection": "daily_sales",
-                    "YoY Growth": "yoy_growth",
-                    "Base Monthly Rent": "rent_base",
-                    "Lead Months Before Opening": "lead_months",
-                    "Rent-Free Months": "rent_free_months",
-                    "Capital Purchases": "capital_purchases",
-                    "Startup Costs": "startup_costs",
-                    "Entry Rate/hr": "entry_rate",
-                    "Experienced Rate/hr": "exp_rate",
-                    "Manager Rate/hr": "manager_rate",
-                    "Hours/Day": "hours_day",
-                    "Days/Month": "days_month",
-                    "Sales Threshold for Extra Worker": "scaling_threshold",
-                    "Initial Marketing Cost": "mkt_initial",
-                    "Monthly Marketing Budget": "mkt_monthly"
-                }
+        # Charts Sheet
+        charts_sheet = writer.book.create_sheet('Charts')
+        
+        # Convert figures to images and add to the sheet
+        img1_bytes = fig1.to_image(format="png")
+        img2_bytes = fig2.to_image(format="png")
+        
+        from openpyxl.drawing.image import Image
+        img1 = Image(BytesIO(img1_bytes))
+        img2 = Image(BytesIO(img2_bytes))
 
-                for param_name, state_key in param_mapping.items():
-                    if param_name in imported_params:
-                        # No special handling needed now, just load the value as is
-                        st.session_state[state_key] = imported_params[param_name]
-                
-                st.success("Parameters loaded successfully!")
+        charts_sheet.add_image(img1, 'A1')
+        charts_sheet.add_image(img2, 'A30')
+        
+    processed_data = output.getvalue()
+    return processed_data
 
-            except Exception as e:
-                st.error(f"Error loading file: {e}")
-    
-    # The download button placeholder will be inside the expander
-    download_button_placeholder = st.empty()
+
+# --- SIDEBAR (Unified) ---
+st.sidebar.header("Load/Save Scenario")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Excel Report to Load Parameters",
+    type="xlsx"
+)
+
+if uploaded_file is not None:
+    if st.sidebar.button("Load Parameters from File"):
+        try:
+            params_df = pd.read_excel(uploaded_file, sheet_name="Parameters")
+            imported_params = dict(zip(params_df['Parameter'], params_df['Value']))
+            
+            # --- Mapping from Excel names to session_state keys ---
+            param_mapping = {
+                "Daily Sales Projection": "daily_sales",
+                "YoY Growth": "yoy_growth",
+                "Base Monthly Rent": "rent_base",
+                "Lead Months Before Opening": "lead_months",
+                "Rent-Free Months": "rent_free_months",
+                "Capital Purchases": "capital_purchases",
+                "Startup Costs": "startup_costs",
+                "Entry Rate/hr": "entry_rate",
+                "Experienced Rate/hr": "exp_rate",
+                "Manager Rate/hr": "manager_rate",
+                "Hours/Day": "hours_day",
+                "Days/Month": "days_month",
+                "Sales Threshold for Extra Worker": "scaling_threshold",
+                "Initial Marketing Cost": "mkt_initial",
+                "Monthly Marketing Budget": "mkt_monthly"
+            }
+
+            for param_name, state_key in param_mapping.items():
+                if param_name in imported_params:
+                    # No special handling needed now, just load the value as is
+                    st.session_state[state_key] = imported_params[param_name]
+            
+            st.sidebar.success("Parameters loaded successfully!")
+
+        except Exception as e:
+            st.sidebar.error(f"Error loading file: {e}")
 
 
 st.sidebar.header("Simulation Inputs")
@@ -187,42 +217,13 @@ with st.sidebar.expander("Marketing Budget"):
     st.number_input("Monthly Marketing Budget", step=50, key="mkt_monthly")
 
 
-# --- Helper Function for Excel Export ---
-def to_excel(params, monthly, annual, ownership, fig1, fig2):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Parameters Sheet
-        params_df = pd.DataFrame(params.items(), columns=['Parameter', 'Value'])
-        params_df.to_excel(writer, sheet_name='Parameters', index=False)
-        
-        # Data Sheets
-        monthly.to_excel(writer, sheet_name='Monthly_Data', index=False)
-        annual.to_excel(writer, sheet_name='Annual_Data', index=False)
-        ownership.to_excel(writer, sheet_name='Ownership_Data', index=False)
-
-        # Charts Sheet
-        charts_sheet = writer.book.create_sheet('Charts')
-        
-        # Convert figures to images and add to the sheet
-        img1_bytes = fig1.to_image(format="png")
-        img2_bytes = fig2.to_image(format="png")
-        
-        from openpyxl.drawing.image import Image
-        img1 = Image(BytesIO(img1_bytes))
-        img2 = Image(BytesIO(img2_bytes))
-
-        charts_sheet.add_image(img1, 'A1')
-        charts_sheet.add_image(img2, 'A30')
-        
-    processed_data = output.getvalue()
-    return processed_data
-
-
-# --- Main App ---
+# --- MAIN PANEL ---
 st.title("🍕 Pizza Business Financial Simulation")
 
+# --- Deterministic Analysis (Always runs) ---
+st.header("Deterministic Analysis")
+
 # Create a copy of the config to pass to the simulation.
-# This allows us to modify it with the user inputs from the sidebar.
 sim_config = config.copy()
 sim_config["project"]["daily_sales_projection"] = st.session_state.daily_sales
 sim_config["project"]["year_over_year_sales_growth"] = st.session_state.yoy_growth / 100.0 # Convert from % to decimal for calculation
@@ -299,21 +300,19 @@ for i, scenario in enumerate(selected_scenarios):
 # --- Display Charts ---
 st.header("Financial Projections Dashboard")
 
-import plotly.express as px
-
 # Create toggles for the chart series
 st.write("### Chart Controls")
 cols = st.columns(5)
 with cols[0]:
-    show_revenue = st.checkbox("Revenue", value=True)
+    show_revenue = st.checkbox("Revenue", value=True, key="det_revenue")
 with cols[1]:
-    show_cogs = st.checkbox("COGS", value=False)
+    show_cogs = st.checkbox("COGS", value=False, key="det_cogs")
 with cols[2]:
-    show_opex = st.checkbox("OPEX", value=False)
+    show_opex = st.checkbox("OPEX", value=False, key="det_opex")
 with cols[3]:
-    show_gp = st.checkbox("Gross Profit", value=False)
+    show_gp = st.checkbox("Gross Profit", value=False, key="det_gp")
 with cols[4]:
-    show_np = st.checkbox("Net Profit", value=True)
+    show_np = st.checkbox("Net Profit", value=True, key="det_np")
 
 # --- Chart 1: Monthly Trends ---
 monthly_to_plot = []
@@ -422,9 +421,60 @@ excel_data = to_excel(
     fig2
 )
 
-download_button_placeholder.download_button(
+st.sidebar.download_button(
     label="Download Full Report as Excel",
     data=excel_data,
     file_name=f"simulation_report_{'_'.join(selected_scenarios)}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
+
+# --- Monte Carlo Analysis (Runs on button click) ---
+st.header("Monte Carlo Simulation")
+st.write("Run a probabilistic simulation to understand the range of potential outcomes.")
+
+mc_cols = st.columns(4)
+with mc_cols[0]:
+    n_runs = st.number_input("Number of Runs", 1000, 100000, 10000)
+with mc_cols[1]:
+    seed = st.number_input("Random Seed", 1, 1000000, 12345)
+with mc_cols[2]:
+    demand_sigma = st.number_input("Demand Noise Sigma", 0.0, 1.0, 0.1)
+with mc_cols[3]:
+    kappa = st.number_input("Menu Mix Kappa", 0.0, 10.0, 1.0)
+
+if st.button("Run Monte Carlo Simulation"):
+    dist_overrides = {
+        "demand_noise": MCDist("lognormal", {"mu": 0, "sigma": demand_sigma}),
+        "menu_mix": MCDist("dirichlet", {"alpha": np.array([item['ratio'] for item in config['menu']['items']]) * kappa}),
+    }
+    
+    mc_results = simulate_monte_carlo(
+        sim_config,
+        scenario_name=selected_scenarios[0] if selected_scenarios else list(config['sales_models'].keys())[0],
+        n_runs=n_runs,
+        seed=seed,
+        dist_overrides=dist_overrides
+    )
+    st.session_state.mc_results = mc_results
+
+if 'mc_results' in st.session_state:
+    st.subheader("Monte Carlo Results")
+    summary = st.session_state.mc_results['summary']
+    runs_annual = st.session_state.mc_results['runs_annual']
+
+    # Display KPIs
+    kpi_cols = st.columns(3)
+    kpi_cols[0].metric("Median Annual Profit (Y1)", f"${summary['annual_profit_p50_y1']:,.0f}")
+    kpi_cols[1].metric("P(Break Even by 12m)", f"{summary['prob_break_even_12m']:.1%}")
+    kpi_cols[2].metric("Median Break-Even Month", f"{summary['break_even_month_p50']:.0f} months")
+
+    # Display Charts
+    y1_profit_hist = px.histogram(
+        runs_annual[runs_annual['Year'] == 1], 
+        x="NetProfit",
+        title="Distribution of Year 1 Net Profit"
+    )
+    st.plotly_chart(y1_profit_hist, use_container_width=True)
+    
+    st.dataframe(runs_annual.head(100))
