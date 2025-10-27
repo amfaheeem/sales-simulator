@@ -78,7 +78,7 @@ init_session_state()
 
 
 # --- Helper Function for Excel Export ---
-def to_excel(params, monthly, annual, ownership, fig1, fig2):
+def to_excel(params, monthly, annual, ownership):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # Parameters Sheet
@@ -89,16 +89,6 @@ def to_excel(params, monthly, annual, ownership, fig1, fig2):
         monthly.to_excel(writer, sheet_name='Monthly_Data', index=False)
         annual.to_excel(writer, sheet_name='Annual_Data', index=False)
         ownership.to_excel(writer, sheet_name='Ownership_Data', index=False)
-
-        # Charts Sheet
-        workbook = writer.book
-        worksheet = workbook.add_worksheet('Charts')
-        
-        img1_bytes = fig1.to_image(format="png")
-        img2_bytes = fig2.to_image(format="png")
-        
-        worksheet.insert_image('A1', 'fig1.png', {'image_data': BytesIO(img1_bytes)})
-        worksheet.insert_image('A30', 'fig2.png', {'image_data': BytesIO(img2_bytes)})
         
     processed_data = output.getvalue()
     return processed_data
@@ -419,9 +409,7 @@ excel_data = to_excel(
     current_params, 
     combined_monthly, 
     combined_annual, 
-    combined_ownership, 
-    fig1, 
-    fig2
+    combined_ownership
 )
 
 st.sidebar.download_button(
