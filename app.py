@@ -105,11 +105,11 @@ with st.sidebar.expander("Load/Save Scenario", expanded=False):
                         # No special handling needed now, just load the value as is
                         st.session_state[state_key] = imported_params[param_name]
                 
-                st.sidebar.success("Parameters loaded successfully!")
+                st.success("Parameters loaded successfully!")
 
             except Exception as e:
-                st.sidebar.error(f"Error loading file: {e}")
-
+                st.error(f"Error loading file: {e}")
+    
     # The download button placeholder will be inside the expander
     download_button_placeholder = st.empty()
 
