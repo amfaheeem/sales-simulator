@@ -142,8 +142,8 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
     # Base anchors
     currency = project.get("currency", "CAD")
     base_month = project.get("base_month", "May")
-    yoy_growth = float(project.get("year_over_year_sales_growth", 0.10))
-    base_daily_sales = float(project.get("daily_sales_projection", 40.0))
+    yoy_growth = float(project.get("year_over_year_sales_growth", 0.0))
+    base_daily_sales = float(project.get("daily_sales_projection", 37.0))
 
     # Sales multipliers for scenario
     if scenario_name not in sales_models:
@@ -189,6 +189,7 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
     rows = []
     month_map = month_index_map(base_month)
     start_month_idx = month_map[base_month]  # normally 0
+    start_year = pd.Timestamp.now().year # Use current year as the start
     n_months = years * 12
 
     # Track cumulative cash and invested capital (capital + any pre-open rent)
@@ -201,6 +202,8 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
         year_num = (t // 12) + 1
         month_in_year_idx = t % 12
         month_name = MONTHS[(start_month_idx + month_in_year_idx) % 12]
+        current_year = start_year + (t // 12)
+        month_label = f"{month_name[:3]}-{str(current_year)[2:]}"
 
         # --- Revenue and COGS Calculation ---
         # 1. Determine daily sales for the current month
@@ -244,6 +247,7 @@ def simulate_one_scenario(cfg: Dict[str, Any], scenario_name: str, years: int = 
         rows.append({
             "Year": year_num,
             "Month": month_name,
+            "MonthLabel": month_label,
             "t": t+1,
             "NumberOfPizzas": round(monthly_pizzas_sold),
             "TotalCapital": round(cumulative_invested),

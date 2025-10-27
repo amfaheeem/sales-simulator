@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 from pathlib import Path
+from io import BytesIO
 
 # The simulation script is in the same directory, so we can import it directly.
 from simulate_pizza_business import simulate_one_scenario
@@ -26,23 +27,109 @@ def load_config():
 
 config = load_config()
 
-# --- Sidebar for Inputs ---
+
+# --- Session State Initialization ---
+# Initialize session_state to hold the values of the widgets
+# This is key to allowing the widgets to be updated programmatically
+def init_session_state():
+    if 'daily_sales' not in st.session_state:
+        st.session_state.daily_sales = config["project"]["daily_sales_projection"]
+    if 'yoy_growth' not in st.session_state:
+        st.session_state.yoy_growth = config["project"]["year_over_year_sales_growth"] * 100
+    if 'rent_base' not in st.session_state:
+        st.session_state.rent_base = config["expenses"]["rent"]["base"]
+    if 'lead_months' not in st.session_state:
+        st.session_state.lead_months = config["project"].get("lead_months_before_open", 6)
+    if 'rent_free_months' not in st.session_state:
+        st.session_state.rent_free_months = config["project"].get("rent_free_months", 4)
+    if 'capital_purchases' not in st.session_state:
+        st.session_state.capital_purchases = config["expenses"]["capital_expenses"]["capital_purchases"]
+    if 'startup_costs' not in st.session_state:
+        st.session_state.startup_costs = config["expenses"]["capital_expenses"]["startup_costs"]
+    if 'entry_rate' not in st.session_state:
+        st.session_state.entry_rate = config["labour"]["roles"]["entry"]["hour_rate"]
+    if 'exp_rate' not in st.session_state:
+        st.session_state.exp_rate = config["labour"]["roles"]["experienced"]["hour_rate"]
+    if 'manager_rate' not in st.session_state:
+        st.session_state.manager_rate = config["labour"]["roles"]["manager"]["hour_rate"]
+    if 'hours_day' not in st.session_state:
+        st.session_state.hours_day = config["labour"]["scaling_rules"].get("hours_per_day", 10)
+    if 'days_month' not in st.session_state:
+        st.session_state.days_month = config["labour"]["scaling_rules"].get("days_per_month", 28)
+    if 'scaling_threshold' not in st.session_state:
+        st.session_state.scaling_threshold = config["labour"]["scaling_rules"].get("daily_sales_threshold_for_extra_worker", 100)
+    if 'mkt_initial' not in st.session_state:
+        st.session_state.mkt_initial = config["expenses"]["marketing"]["initial_cost"]
+    if 'mkt_monthly' not in st.session_state:
+        st.session_state.mkt_monthly = config["expenses"]["marketing"]["monthly"]
+    if 'custom_multipliers' not in st.session_state:
+        st.session_state.custom_multipliers = config["sales_models"]["Scenario_3_Middle_Ground"]
+
+init_session_state()
+
+
+# --- Sidebar ---
+with st.sidebar.expander("Load/Save Scenario", expanded=False):
+    uploaded_file = st.file_uploader(
+        "Upload Excel Report to Load Parameters",
+        type="xlsx"
+    )
+
+    if uploaded_file is not None:
+        if st.button("Load Parameters from File"):
+            try:
+                params_df = pd.read_excel(uploaded_file, sheet_name="Parameters")
+                imported_params = dict(zip(params_df['Parameter'], params_df['Value']))
+                
+                # --- Mapping from Excel names to session_state keys ---
+                param_mapping = {
+                    "Daily Sales Projection": "daily_sales",
+                    "YoY Growth": "yoy_growth",
+                    "Base Monthly Rent": "rent_base",
+                    "Lead Months Before Opening": "lead_months",
+                    "Rent-Free Months": "rent_free_months",
+                    "Capital Purchases": "capital_purchases",
+                    "Startup Costs": "startup_costs",
+                    "Entry Rate/hr": "entry_rate",
+                    "Experienced Rate/hr": "exp_rate",
+                    "Manager Rate/hr": "manager_rate",
+                    "Hours/Day": "hours_day",
+                    "Days/Month": "days_month",
+                    "Sales Threshold for Extra Worker": "scaling_threshold",
+                    "Initial Marketing Cost": "mkt_initial",
+                    "Monthly Marketing Budget": "mkt_monthly"
+                }
+
+                for param_name, state_key in param_mapping.items():
+                    if param_name in imported_params:
+                        # No special handling needed now, just load the value as is
+                        st.session_state[state_key] = imported_params[param_name]
+                
+                st.sidebar.success("Parameters loaded successfully!")
+
+            except Exception as e:
+                st.sidebar.error(f"Error loading file: {e}")
+
+    # The download button placeholder will be inside the expander
+    download_button_placeholder = st.empty()
+
+
 st.sidebar.header("Simulation Inputs")
 
 # Project Settings
 st.sidebar.subheader("Project Settings")
-daily_sales = st.sidebar.number_input(
+st.sidebar.number_input(
     "Daily Sales Projection (Pizzas/Day)",
-    value=config["project"]["daily_sales_projection"],
-    step=1
+    step=1,
+    key="daily_sales"
 )
-yoy_growth = st.sidebar.slider(
+st.sidebar.slider(
     "Year-over-Year Growth (%)",
     min_value=0.0,
     max_value=25.0,
-    value=config["project"]["year_over_year_sales_growth"] * 100,
-    step=0.5
-) / 100.0
+    step=0.5,
+    key="yoy_growth"
+)
 
 # Sales Scenario
 st.sidebar.subheader("Sales Model")
@@ -58,9 +145,6 @@ if use_custom_scenario:
     with st.sidebar.expander("Define Custom Multipliers", expanded=True):
         months = ["May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April"]
         
-        if 'custom_multipliers' not in st.session_state:
-            st.session_state.custom_multipliers = config["sales_models"]["Scenario_3_Middle_Ground"]
-
         custom_multipliers_list = []
         for i, month in enumerate(months):
             value = st.slider(
@@ -70,7 +154,6 @@ if use_custom_scenario:
         
         st.session_state.custom_multipliers = custom_multipliers_list
     
-    # When custom is used, we run only one scenario
     selected_scenarios = ["Custom..."]
 
 else:
@@ -83,49 +166,56 @@ else:
 
 # Expense & Capital Settings
 st.sidebar.subheader("Startup & Capital")
-rent_base = st.sidebar.number_input(
-    "Base Monthly Rent",
-    value=config["expenses"]["rent"]["base"],
-    step=100
-)
-lead_months = st.sidebar.number_input(
-    "Lead Months Before Opening",
-    value=config["project"].get("lead_months_before_open", 6),
-    step=1
-)
-rent_free_months = st.sidebar.number_input(
-    "Rent-Free Months",
-    value=config["project"].get("rent_free_months", 4),
-    step=1
-)
-capital_purchases = st.sidebar.number_input(
-    "Capital Purchases",
-    value=config["expenses"]["capital_expenses"]["capital_purchases"],
-    step=1000
-)
-startup_costs = st.sidebar.number_input(
-    "Startup Costs",
-    value=config["expenses"]["capital_expenses"]["startup_costs"],
-    step=1000
-)
+st.sidebar.number_input("Base Monthly Rent", step=100, key="rent_base")
+st.sidebar.number_input("Lead Months Before Opening", step=1, key="lead_months")
+st.sidebar.number_input("Rent-Free Months", step=1, key="rent_free_months")
+st.sidebar.number_input("Capital Purchases", step=1000, key="capital_purchases")
+st.sidebar.number_input("Startup Costs", step=1000, key="startup_costs")
 
 # Labour Assumptions
 with st.sidebar.expander("Labour Assumptions"):
-    labour_roles = config["labour"]["roles"]
-    entry_rate = st.number_input("Entry Rate/hr", value=labour_roles["entry"]["hour_rate"], step=1)
-    exp_rate = st.number_input("Experienced Rate/hr", value=labour_roles["experienced"]["hour_rate"], step=1)
-    manager_rate = st.number_input("Manager Rate/hr", value=labour_roles["manager"]["hour_rate"], step=1)
-    
-    labour_rules = config["labour"]["scaling_rules"]
-    hours_day = st.slider("Hours/Day", 8, 16, value=labour_rules.get("hours_per_day", 10))
-    days_month = st.slider("Days/Month", 20, 31, value=labour_rules.get("days_per_month", 28))
-    scaling_threshold = st.number_input("Daily Sales Threshold for Extra Worker", value=labour_rules.get("daily_sales_threshold_for_extra_worker", 100))
+    st.number_input("Entry Rate/hr", step=1, key="entry_rate")
+    st.number_input("Experienced Rate/hr", step=1, key="exp_rate")
+    st.number_input("Manager Rate/hr", step=1, key="manager_rate")
+    st.slider("Hours/Day", 8, 16, key="hours_day")
+    st.slider("Days/Month", 20, 31, key="days_month")
+    st.number_input("Daily Sales Threshold for Extra Worker", key="scaling_threshold")
 
 # Marketing Budget
 with st.sidebar.expander("Marketing Budget"):
-    mkt_cfg = config["expenses"]["marketing"]
-    mkt_initial = st.number_input("Initial Marketing Cost", value=mkt_cfg["initial_cost"], step=500)
-    mkt_monthly = st.number_input("Monthly Marketing Budget", value=mkt_cfg["monthly"], step=50)
+    st.number_input("Initial Marketing Cost", step=500, key="mkt_initial")
+    st.number_input("Monthly Marketing Budget", step=50, key="mkt_monthly")
+
+
+# --- Helper Function for Excel Export ---
+def to_excel(params, monthly, annual, ownership, fig1, fig2):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Parameters Sheet
+        params_df = pd.DataFrame(params.items(), columns=['Parameter', 'Value'])
+        params_df.to_excel(writer, sheet_name='Parameters', index=False)
+        
+        # Data Sheets
+        monthly.to_excel(writer, sheet_name='Monthly_Data', index=False)
+        annual.to_excel(writer, sheet_name='Annual_Data', index=False)
+        ownership.to_excel(writer, sheet_name='Ownership_Data', index=False)
+
+        # Charts Sheet
+        charts_sheet = writer.book.create_sheet('Charts')
+        
+        # Convert figures to images and add to the sheet
+        img1_bytes = fig1.to_image(format="png")
+        img2_bytes = fig2.to_image(format="png")
+        
+        from openpyxl.drawing.image import Image
+        img1 = Image(BytesIO(img1_bytes))
+        img2 = Image(BytesIO(img2_bytes))
+
+        charts_sheet.add_image(img1, 'A1')
+        charts_sheet.add_image(img2, 'A30')
+        
+    processed_data = output.getvalue()
+    return processed_data
 
 
 # --- Main App ---
@@ -134,23 +224,23 @@ st.title("🍕 Pizza Business Financial Simulation")
 # Create a copy of the config to pass to the simulation.
 # This allows us to modify it with the user inputs from the sidebar.
 sim_config = config.copy()
-sim_config["project"]["daily_sales_projection"] = daily_sales
-sim_config["project"]["year_over_year_sales_growth"] = yoy_growth
-sim_config["project"]["lead_months_before_open"] = lead_months
-sim_config["project"]["rent_free_months"] = rent_free_months
-sim_config["expenses"]["rent"]["base"] = rent_base
-sim_config["expenses"]["capital_expenses"]["capital_purchases"] = capital_purchases
-sim_config["expenses"]["capital_expenses"]["startup_costs"] = startup_costs
+sim_config["project"]["daily_sales_projection"] = st.session_state.daily_sales
+sim_config["project"]["year_over_year_sales_growth"] = st.session_state.yoy_growth / 100.0 # Convert from % to decimal for calculation
+sim_config["project"]["lead_months_before_open"] = st.session_state.lead_months
+sim_config["project"]["rent_free_months"] = st.session_state.rent_free_months
+sim_config["expenses"]["rent"]["base"] = st.session_state.rent_base
+sim_config["expenses"]["capital_expenses"]["capital_purchases"] = st.session_state.capital_purchases
+sim_config["expenses"]["capital_expenses"]["startup_costs"] = st.session_state.startup_costs
 
 # Update labour and marketing configs from the new widgets
-sim_config["labour"]["roles"]["entry"]["hour_rate"] = entry_rate
-sim_config["labour"]["roles"]["experienced"]["hour_rate"] = exp_rate
-sim_config["labour"]["roles"]["manager"]["hour_rate"] = manager_rate
-sim_config["labour"]["scaling_rules"]["hours_per_day"] = hours_day
-sim_config["labour"]["scaling_rules"]["days_per_month"] = days_month
-sim_config["labour"]["scaling_rules"]["daily_sales_threshold_for_extra_worker"] = scaling_threshold
-sim_config["expenses"]["marketing"]["initial_cost"] = mkt_initial
-sim_config["expenses"]["marketing"]["monthly"] = mkt_monthly
+sim_config["labour"]["roles"]["entry"]["hour_rate"] = st.session_state.entry_rate
+sim_config["labour"]["roles"]["experienced"]["hour_rate"] = st.session_state.exp_rate
+sim_config["labour"]["roles"]["manager"]["hour_rate"] = st.session_state.manager_rate
+sim_config["labour"]["scaling_rules"]["hours_per_day"] = st.session_state.hours_day
+sim_config["labour"]["scaling_rules"]["days_per_month"] = st.session_state.days_month
+sim_config["labour"]["scaling_rules"]["daily_sales_threshold_for_extra_worker"] = st.session_state.scaling_threshold
+sim_config["expenses"]["marketing"]["initial_cost"] = st.session_state.mkt_initial
+sim_config["expenses"]["marketing"]["monthly"] = st.session_state.mkt_monthly
 
 # If the custom scenario is selected, add it to the simulation config
 if use_custom_scenario:
@@ -236,20 +326,22 @@ if show_np: monthly_to_plot.append("NetProfit")
 if monthly_to_plot:
     # Melt the dataframe to have a 'Metric' column for line_dash
     monthly_melted = combined_monthly.melt(
-        id_vars=['t', 'Scenario'], 
+        id_vars=['t', 'Scenario', 'MonthLabel'], 
         value_vars=monthly_to_plot,
         var_name='Metric',
         value_name='Amount'
     )
     fig1 = px.line(
         monthly_melted, 
-        x="t", 
+        x="MonthLabel", 
         y="Amount", 
         color="Scenario",
         line_dash="Metric",
         title="Monthly Financial Trends",
-        labels={"t": "Month", "Amount": "Amount (CAD)"}
+        labels={"MonthLabel": "Month", "Amount": "Amount (CAD)"}
     )
+    # Sort x-axis chronologically
+    fig1.update_xaxes(categoryorder='array', categoryarray=combined_monthly['MonthLabel'].unique())
     fig1.update_layout(yaxis_tickprefix="$", yaxis_tickformat=".2s")
     st.plotly_chart(fig1, use_container_width=True)
 
@@ -294,3 +386,45 @@ st.dataframe(combined_annual)
 
 st.subheader("Combined Ownership & Equity Unlock")
 st.dataframe(combined_ownership)
+
+# --- Download Button Logic ---
+# Collect all parameters for the report
+current_params = {
+    "Daily Sales Projection": st.session_state.daily_sales,
+    "YoY Growth": st.session_state.yoy_growth,
+    "Selected Scenarios": ", ".join(selected_scenarios) if not use_custom_scenario else "Custom",
+    "Base Monthly Rent": st.session_state.rent_base,
+    "Lead Months Before Opening": st.session_state.lead_months,
+    "Rent-Free Months": st.session_state.rent_free_months,
+    "Capital Purchases": st.session_state.capital_purchases,
+    "Startup Costs": st.session_state.startup_costs,
+    "Entry Rate/hr": st.session_state.entry_rate,
+    "Experienced Rate/hr": st.session_state.exp_rate,
+    "Manager Rate/hr": st.session_state.manager_rate,
+    "Hours/Day": st.session_state.hours_day,
+    "Days/Month": st.session_state.days_month,
+    "Sales Threshold for Extra Worker": st.session_state.scaling_threshold,
+    "Initial Marketing Cost": st.session_state.mkt_initial,
+    "Monthly Marketing Budget": st.session_state.mkt_monthly
+}
+if use_custom_scenario:
+    months = ["May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April"]
+    for i, month in enumerate(months):
+        current_params[f"Multiplier - {month}"] = st.session_state.custom_multipliers[i]
+
+
+excel_data = to_excel(
+    current_params, 
+    combined_monthly, 
+    combined_annual, 
+    combined_ownership, 
+    fig1, 
+    fig2
+)
+
+download_button_placeholder.download_button(
+    label="Download Full Report as Excel",
+    data=excel_data,
+    file_name=f"simulation_report_{'_'.join(selected_scenarios)}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)

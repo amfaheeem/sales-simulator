@@ -4,8 +4,9 @@
     "currency": "CAD",
     "initial_investment": 180000,
     "base_month": "May",
-    "year_over_year_sales_growth": 0.10,
-    "daily_sales_projection": 37
+    "year_over_year_sales_growth": 0.0,
+    "daily_sales_projection": 37,
+    "founder_equity_initial": 0.25
   },
   "menu": {
     "items": [
