@@ -250,6 +250,7 @@ def simulate_monte_carlo(
         "runs_monthly": runs_monthly,
         "runs_annual": runs_annual,
         "summary": summary,
+        "scenario_name": scenario_name,
     }
 
 

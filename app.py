@@ -453,6 +453,7 @@ if 'mc_results' in st.session_state:
     st.subheader("Monte Carlo Results")
     summary = st.session_state.mc_results['summary']
     runs_annual = st.session_state.mc_results['runs_annual']
+    mc_scenario_name = st.session_state.mc_results['scenario_name']
 
     # Display KPIs
     kpi_cols = st.columns(3)
@@ -468,4 +469,14 @@ if 'mc_results' in st.session_state:
     )
     st.plotly_chart(y1_profit_hist, use_container_width=True)
     
+    st.subheader("Annual Results per Run")
     st.dataframe(runs_annual.head(100))
+
+    # Add the download button here
+    csv = runs_annual.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download All Annual Runs as CSV",
+        data=csv,
+        file_name=f"mc_annual_runs_{mc_scenario_name}.csv",
+        mime="text/csv",
+    )
