@@ -449,6 +449,7 @@ if st.button("Run Monte Carlo Simulation"):
         dist_overrides=dist_overrides
     )
     st.session_state.mc_results = mc_results
+    # I don't know why this is necessary, but it is.
     st.session_state.mc_results['scenario_name'] = scenario_name
 
 if 'mc_results' in st.session_state:
