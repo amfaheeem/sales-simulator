@@ -440,14 +440,16 @@ if st.button("Run Monte Carlo Simulation"):
         "menu_mix": MCDist("dirichlet", {"alpha": np.array([item['ratio'] for item in config['menu']['items']]) * kappa}),
     }
     
+    scenario_name = selected_scenarios[0] if selected_scenarios else list(config['sales_models'].keys())[0]
     mc_results = simulate_monte_carlo(
         sim_config,
-        scenario_name=selected_scenarios[0] if selected_scenarios else list(config['sales_models'].keys())[0],
+        scenario_name=scenario_name,
         n_runs=n_runs,
         seed=seed,
         dist_overrides=dist_overrides
     )
     st.session_state.mc_results = mc_results
+    st.session_state.mc_results['scenario_name'] = scenario_name
 
 if 'mc_results' in st.session_state:
     st.subheader("Monte Carlo Results")
